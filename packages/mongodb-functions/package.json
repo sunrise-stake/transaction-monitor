@@ -1,0 +1,13 @@
+{
+  "name": "mongodb-functions",
+  "version": "1.0.0",
+  "main": "index.js",
+  "license": "MIT",
+  "scripts": {
+    "realm-login": "realm-cli login --api-key=$REALM_API_KEY --private-api-key=$REALM_PRIVATE_API_KEY",
+    "deploy": "echo TODO"
+  },
+  "dependencies": {
+    "mongodb-realm-cli": "^2.6.2"
+  }
+}

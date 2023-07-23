@@ -1,0 +1,1 @@
+export const uniqBy = <T, U>(fn: (t: T) => U, ...entries: T[][]): U[] => [...new Set(entries.flat().map(fn))]
