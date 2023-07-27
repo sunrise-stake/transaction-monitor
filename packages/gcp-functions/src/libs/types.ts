@@ -8,19 +8,6 @@ export type DBTransaction = {
     timestamp: number
     type: 'MINT' | 'TRANSFER' | 'BURN' | 'OTHER'
 }
-export type NeighbourResult = {
-    senderResult: {
-        _id: string,
-        senders: string[],
-        degree: number
-    }[],
-    recipientResult: {
-        _id: string,
-        recipients: string[],
-        degree: number
-    }[]
-}
-
 export type BalanceDetails = {
     address: PublicKey,
     balance: number,
@@ -28,13 +15,22 @@ export type BalanceDetails = {
     end: Date,
 }
 
-export type AugmentedNeighbourResult = {
-    senderResult: (BalanceDetails & {
-        senders: PublicKey[],
-        degree: number
-    })[],
-    recipientResult: (BalanceDetails & {
-        recipients: PublicKey[],
-        degree: number
-    })[]
+export type NeighbourResponse = {
+    senderResult: NeighbourResponseEntry[],
+    recipientResult: NeighbourResponseEntry[],
+}
+
+export type NeighbourResponseEntry = {
+    sender: string,
+    recipient: string,
+}
+
+export type AugmentedNeighbourResponse = {
+    senderResult: AugmentedNeighbourResponseEntry[],
+    recipientResult: AugmentedNeighbourResponseEntry[],
+}
+
+export type AugmentedNeighbourResponseEntry = BalanceDetails & {
+    sender: PublicKey,
+    recipient: PublicKey,
 }

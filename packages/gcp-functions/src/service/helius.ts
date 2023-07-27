@@ -1,7 +1,7 @@
 import {GSOL_MINT} from "../libs/constants";
 import {getSolBalanceDifferences, getTokenBalanceDifferences} from "../libs/helius";
 import {TokenBalanceDifference, TransactionInBlock} from "../libs/helius/types";
-import {insertOne} from "../libs/db";
+import {insertTransaction} from "../libs/db";
 import {LAMPORTS_PER_SOL} from "@solana/web3.js";
 
 const deposit = (heliusTransaction: TransactionInBlock, balanceDifference: TokenBalanceDifference) => {
@@ -15,7 +15,7 @@ const deposit = (heliusTransaction: TransactionInBlock, balanceDifference: Token
     const to = balanceDifference.owner;
     const isDeposit = from.equals(to)
 
-    return insertOne({
+    return insertTransaction({
         amount: balanceDifference.diff,
         from,
         to,
@@ -29,7 +29,7 @@ const transfer = (heliusTransaction: TransactionInBlock, balanceDifferences: Tok
     const senderDiff = balanceDifferences.find(balanceDifference => balanceDifference.diff < 0);
     const recipientDiff = balanceDifferences.find(balanceDifference => balanceDifference.diff > 0);
 
-    return insertOne({
+    return insertTransaction({
         amount: recipientDiff.diff,
         from: senderDiff.owner,
         to: recipientDiff.owner,

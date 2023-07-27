@@ -1,10 +1,14 @@
 import {PublicKey} from "@solana/web3.js";
 import {getNetTransfers, getTotalMints, graphLookup} from "../libs/db";
-import {AugmentedNeighbourResult, BalanceDetails, NeighbourResult} from "../libs/types";
-import {uniqBy} from "../libs/util";
+import {
+    AugmentedNeighbourResponse,
+    BalanceDetails,
+    NeighbourResponse,
+} from "../libs/types";
+import {dedupe, isNotReflexive, toPubKeys} from "../libs/util";
 
 const combine = (mintAmounts: BalanceDetails[], netTransfers: BalanceDetails[]):BalanceDetails[] => {
-    const totalAddresses = uniqBy(bd => bd.address, mintAmounts, netTransfers);
+    const totalAddresses = dedupe([...mintAmounts, ...netTransfers].map(bd => bd.address));
     return totalAddresses.map(address => {
         const mintAmount = mintAmounts.find(ma => ma.address.equals(address));
         const netTransfer = netTransfers.find(nt => nt.address.equals(address));
@@ -35,40 +39,41 @@ const getBalanceDetails = async (addresses: PublicKey[]): Promise<BalanceDetails
     return combine(mintAmounts, netTransfers);
 }
 
-const augment = async (neighbours: NeighbourResult): Promise<AugmentedNeighbourResult> => {
-    const recipients = neighbours.recipientResult.map(entry => new PublicKey(entry._id));
-    const senders = neighbours.senderResult.map(entry => new PublicKey(entry._id));
+const augment = async (neighbours: NeighbourResponse): Promise<AugmentedNeighbourResponse> => {
+    const senders = dedupe(neighbours.senderResult).filter(isNotReflexive).map(toPubKeys);
+    const recipients = dedupe(neighbours.recipientResult).filter(isNotReflexive).map(toPubKeys);
 
-    const dedupedCombinedNeighbours = [...new Set([
-        ...recipients,
-        ...senders
-    ])];
-
-    const balanceDetails = await getBalanceDetails(dedupedCombinedNeighbours);
+    const neighbourKeys = dedupe([
+        ...neighbours.senderResult.map(s => s.recipient),
+        ...neighbours.recipientResult.map(r => r.sender),
+    ]).map(nk => new PublicKey(nk));
+    const balanceDetails = await getBalanceDetails(neighbourKeys);
 
     return {
-        recipientResult: neighbours.recipientResult.map(entry => {
-            const balanceDetail = balanceDetails.find(bd => bd.address.toBase58() === entry._id)
+        recipientResult: recipients.map(entry => {
+            // TODO optimise into a map
+            const balanceDetail = balanceDetails.find(bd => bd.address.equals(entry.sender))
+            if (!balanceDetail) console.warn("NO BALANCE DETAIL FOUND FOR " + entry.sender.toBase58());
             return {
                 // TODO these default dates are wrong
-                ...(balanceDetail || { address: new PublicKey(entry._id), balance: 0, start: new Date(), end: new Date() }),
-                recipients: entry.recipients.map(recipient => new PublicKey(recipient)),
-                degree: entry.degree,
+                ...balanceDetail,
+                ...entry
             }
         }),
-        senderResult: neighbours.senderResult.map(entry => {
-            const balanceDetail = balanceDetails.find(bd => bd.address.toBase58() === entry._id)
+        senderResult: senders.map(entry => {
+            // TODO optimise into a map
+            const balanceDetail = balanceDetails.find(bd => bd.address.equals(entry.recipient))
+            if (!balanceDetail) console.warn("NO BALANCE DETAIL FOUND FOR " + entry.recipient.toBase58());
             return {
                 // TODO these default dates are wrong
-                ...(balanceDetail || { address: new PublicKey(entry._id), balance: 0, start: new Date(), end: new Date() }),
-                senders: entry.senders.map(recipient => new PublicKey(recipient)),
-                degree: entry.degree,
+                ...balanceDetail,
+                ...entry
             }
         }),
     }
 }
 
-export const getNeighbours = async (address: PublicKey, degree?: number): Promise<AugmentedNeighbourResult> => {
+export const getNeighbours = async (address: PublicKey, degree?: number): Promise<AugmentedNeighbourResponse> => {
     const neighbours = await graphLookup(address, degree);
     return augment(neighbours);
 }

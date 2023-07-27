@@ -5,9 +5,8 @@ gcloud functions deploy transaction-monitor \
   --trigger-http \
   --region europe-central2 \
   --allow-unauthenticated \
-  --set-secrets='DB_KEY=TransactionMonitorDBWriteKey:latest' \
+  --set-secrets='DB_URI=MongoDBURI:latest' \
   --set-secrets='HELIUS_KEY=HeliusAuthKey:latest' \
-  --set-env-vars='DB_URL=https://data.mongodb-api.com/app/data-vhksk/endpoint/data/v1/action/' \
   --service-account='sunrise-378713@appspot.gserviceaccount.com'
 #  --source dist/
 
