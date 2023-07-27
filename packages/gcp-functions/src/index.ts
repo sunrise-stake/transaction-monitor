@@ -3,10 +3,11 @@ import {logger} from "./libs/logs";
 import {processEvent} from "./service/helius";
 
 import * as dotenv from "dotenv";
+dotenv.config();
+
 import {PublicKey} from "@solana/web3.js";
 import {getNeighbours} from "./service/forest";
 import {getFirstAndLastTransfer} from "./libs/db";
-dotenv.config();
 
 functions.http('handleTransaction', async (req, res) => {
     const { body, headers } = req;
@@ -70,8 +71,14 @@ functions.http('getNeighbours', async (req, res) => {
 
     const publicKey = new PublicKey(address);
 
-    const [firstTransfer, lastTransfer] = await getFirstAndLastTransfer(publicKey);
-    const neighbours = await getNeighbours(publicKey, degree);
+    const firstAndLastTransferPromise = getFirstAndLastTransfer(publicKey);
+    const neighboursPromise = getNeighbours(publicKey, degree);
+
+    const firstAndLastTransfer = await firstAndLastTransferPromise;
+    const neighbours = await neighboursPromise;
+
+    const firstTransfer = firstAndLastTransfer ? firstAndLastTransfer[0].getTime() : null;
+    const lastTransfer = firstAndLastTransfer ? firstAndLastTransfer[1].getTime() : null;
 
     res.status(200).send({ neighbours, firstTransfer, lastTransfer });
 });

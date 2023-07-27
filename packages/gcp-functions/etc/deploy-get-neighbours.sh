@@ -5,8 +5,9 @@ gcloud functions deploy get-neighbours \
   --trigger-http \
   --region europe-central2 \
   --allow-unauthenticated \
+  --set-secrets='DB_URI=MongoDBURI:latest' \
   --set-secrets='GRAPH_LOOKUP_SECRET=GraphLookupSecret:latest' \
-  --set-env-vars='GRAPH_LOOKUP_URL=https://eu-central-1.aws.data.mongodb-api.com/app/graphlookup-zklgq/endpoint/graphLookup' \
+  --set-env-vars='GRAPH_LOOKUP_URL=https://eu-central-1.aws.data.mongodb-api.com/app/graphlookup-zklgq/endpoint/lookup' \
   --service-account='sunrise-378713@appspot.gserviceaccount.com'
 #  --source dist/
 

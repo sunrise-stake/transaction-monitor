@@ -1,7 +1,22 @@
 import fetch from "node-fetch";
-import {BalanceDetails, DBTransaction, NeighbourResult} from "./types";
+import {BalanceDetails, DBTransaction, NeighbourResponse} from "./types";
 import {logger} from "./logs";
 import {PublicKey} from "@solana/web3.js";
+import * as dotenv from "dotenv";
+dotenv.config();
+
+import {MongoClient, ServerApiVersion} from "mongodb";
+
+// Create a MongoClient with a MongoClientOptions object to set the Stable API version
+// MongoClient auto-connects so no need to store the connect()
+// promise anywhere and reference it.
+const client = new MongoClient(process.env.DB_URI, {
+    serverApi: {
+        version: ServerApiVersion.v1,
+        strict: true,
+        deprecationErrors: true,
+    }
+});
 
 const firstAndLastDatePipeline = (recipient: PublicKey) => [
     {
@@ -26,50 +41,63 @@ const firstAndLastDatePipeline = (recipient: PublicKey) => [
     }
 ]
 
-export const insertOne = (transaction:DBTransaction):Promise<{  status, body: any }> => {
+export const insertTransaction = (transaction:DBTransaction):Promise<{  status, body: any }> => {
     logger.log({
         message: "Inserting transaction",
         transaction
     });
-    return post('insertOne', {
-        collection: transaction.type === 'MINT' ? 'mints' : 'transfers',
-        document: {
-            signature: transaction.signature,
-            timestamp: {$date: {$numberLong: transaction.timestamp + "000"}},
-            recipient: transaction.to.toBase58(),
-            amount: transaction.amount,
-            sender: transaction.from.toBase58()
-        }
+    return insertOne(transaction.type === 'MINT' ? 'mints' : 'transfers', {
+        signature: transaction.signature,
+        timestamp: {$date: {$numberLong: transaction.timestamp + "000"}},
+        recipient: transaction.to.toBase58(),
+        amount: transaction.amount,
+        sender: transaction.from.toBase58()
     })
 }
 
-const datesFromBody = (result: { body: { documents: { firstDate: number, lastDate: number }[]}}):[Date, Date] =>
-    result.body.documents.length === 0 ? null : [
-        new Date(result.body.documents[0].firstDate),
-        new Date(result.body.documents[0].lastDate),
+const datesFromResult = (result: { firstDate: number, lastDate: number }[]):[Date, Date] =>
+    result.length === 0 ? null : [
+        new Date(result[0].firstDate),
+        new Date(result[0].lastDate),
     ]
 ;
 
-export const getFirstAndLastTransfer = async (address: PublicKey) : Promise<[Date, Date]> => {
-    const mintPromise = post('aggregate', {
-        collection: 'mints',
-        pipeline: firstAndLastDatePipeline(address)
-    });
+const timedFn = async <T>(fn: () => Promise<T>, name: string): Promise<T> => {
+    const start = Date.now();
+    const result = await fn();
+    const end = Date.now();
+    logger.log({message: `Finished ${name} in ${end - start}ms`, severity: "DEBUG"})
+    return result;
+}
 
-    const transferPromise = post('aggregate', {
-        collection: 'transfers',
-        pipeline: firstAndLastDatePipeline(address)
-    });
-
-    const mintResult = await mintPromise;
-    const transferResult = await transferPromise;
-
-    if (mintResult.status >= 400 || transferResult.status >= 400) {
-        throw new Error("Error retrieving first date");
+const insertOne = async (collection: string, document: any): Promise<{ status, body: any }> => {
+    const result = await client.db('gsol-tracker').collection(collection).insertOne(document);
+    return {
+        status: result.insertedId ? 200 : 500,
+        body: result
     }
+}
 
-    const mintDates = datesFromBody(mintResult);
-    const transferDates = datesFromBody(transferResult);
+const aggregate = <T>(collection: string, pipeline: any[]): Promise<T[]> => client.db('gsol-tracker').collection(collection).aggregate<T>(pipeline).toArray()
+
+const timedAggregate = async <T>(collection: string, pipeline: any[], name: string): Promise<T[]> =>
+    timedFn(() => aggregate<T>(collection, pipeline), name)
+
+export const getFirstAndLastTransfer = async (address: PublicKey) : Promise<[Date, Date] | null> => {
+    const mintResultPromise = timedAggregate<{
+        firstDate: number,
+        lastDate: number
+    }>('mints', firstAndLastDatePipeline(address), 'firstAndLastMint');
+    const transferResultPromise = timedAggregate<{
+        firstDate: number,
+        lastDate: number
+    }>('transfers', firstAndLastDatePipeline(address), 'firstAndLastTransfer');
+
+    const mintResult = await mintResultPromise;
+    const transferResult = await transferResultPromise;
+
+    const mintDates = datesFromResult(mintResult);
+    const transferDates = datesFromResult(transferResult);
 
     if (mintDates === null) return transferDates
     if (transferDates === null) return mintDates
@@ -81,10 +109,11 @@ export const getFirstAndLastTransfer = async (address: PublicKey) : Promise<[Dat
 }
 
 export const getTotalMints = async (addresses: PublicKey[]): Promise<BalanceDetails[]> => {
+    const addressStrings = addresses.map(a => a.toBase58());
     const aggregationPipeline = [
         {
             $match: {
-                recipient: {$in: addresses.map(a => a.toBase58())}
+                recipient: {$in: addressStrings}
             }
         },
         {
@@ -105,18 +134,15 @@ export const getTotalMints = async (addresses: PublicKey[]): Promise<BalanceDeta
             }
         }
     ]
-    console.log(JSON.stringify(aggregationPipeline, null, 2));
 
-    const timestamp = new Date().getTime();
-    const { status, body } = await post('aggregate', {
-        collection: 'mints',
-        pipeline: aggregationPipeline
-    });
-    console.log(`Total mints took ${new Date().getTime() - timestamp}ms`);
+    const documents = await timedAggregate<{
+        recipient: string,
+        totalMintAmount: number,
+        earliestMintTimestamp: string,
+        latestMintTimestamp: string
+    }>('mints', aggregationPipeline, 'totalMints');
 
-    if (status >= 400) throw new Error("Error retrieving mint total");
-
-    return body.documents.map(entry => ({
+    return documents.map(entry => ({
         address: new PublicKey(entry.recipient),
         balance: entry.totalMintAmount,
         start: new Date(Date.parse(entry.earliestMintTimestamp)),
@@ -125,12 +151,13 @@ export const getTotalMints = async (addresses: PublicKey[]): Promise<BalanceDeta
 }
 
 export const getNetTransfers = async (addresses: PublicKey[]): Promise<BalanceDetails[]> => {
+    const addressStrings = addresses.map(a => a.toBase58());
     const aggregationPipeline = [
         {
             $match: {
                 $or: [
-                    { recipient: { $in: addresses } },
-                    { sender: { $in: addresses } }
+                    { recipient: { $in: addressStrings } },
+                    { sender: { $in: addressStrings } }
                 ]
             }
         },
@@ -139,7 +166,7 @@ export const getNetTransfers = async (addresses: PublicKey[]): Promise<BalanceDe
                 incoming: [
                     {
                         $match: {
-                            recipient: { $in: addresses }
+                            recipient: { $in: addressStrings }
                         }
                     },
                     {
@@ -201,19 +228,14 @@ export const getNetTransfers = async (addresses: PublicKey[]): Promise<BalanceDe
         }
     ]
 
-    console.log(JSON.stringify(aggregationPipeline, null, 2));
+    const documents = await timedAggregate<{
+        recipient: string,
+        netTransferAmount: number,
+        earliestTransferTimestamp: string,
+        latestTransferTimestamp: string
+    }>('transfers', aggregationPipeline, 'netTransfers');
 
-    const timestamp = new Date().getTime();
-
-    const { status, body } = await post('aggregate', {
-        collection: 'transfers',
-        pipeline: aggregationPipeline
-    });
-    console.log(`Net transfers took ${new Date().getTime() - timestamp}ms`);
-
-    if (status >= 400) throw new Error("Error retrieving transfer total");
-
-    return body.documents.map(entry => ({
+    return documents.map(entry => ({
         address: new PublicKey(entry.recipient),
         balance: entry.netTransferAmount,
         start: new Date(Date.parse(entry.earliestTransferTimestamp)),
@@ -226,7 +248,7 @@ export const getNetTransfers = async (addresses: PublicKey[]): Promise<BalanceDe
  * @param address
  * @param degree
  */
-export const graphLookup = async (address: PublicKey, degree: number = 2): Promise<NeighbourResult> => {
+export const graphLookup = async (address: PublicKey, degree: number = 2): Promise<NeighbourResponse> => {
     const queryParams =
         `?secret=${process.env.GRAPH_LOOKUP_SECRET}&address=${address.toBase58()}&degree=${degree}`;
     const {status, body} = await fetch(process.env.GRAPH_LOOKUP_URL + queryParams).then(async (res) => ({
@@ -238,20 +260,3 @@ export const graphLookup = async (address: PublicKey, degree: number = 2): Promi
 
     return body;
 };
-
-const post = (action: 'insertOne' | 'aggregate', body: any) =>
-    fetch(process.env.DB_URL + action, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'api-key': process.env.DB_KEY,
-        },
-        body: JSON.stringify({
-            dataSource: "Cluster0",
-            database: "gsol-tracker",
-            ...body
-        }),
-    }).then(async (res) =>  ({
-        status: res.status,
-        body: await res.json()
-    }));
