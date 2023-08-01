@@ -53,23 +53,33 @@ const augment = async (neighbours: NeighbourResponse): Promise<AugmentedNeighbou
         recipientResult: recipients.map(entry => {
             // TODO optimise into a map
             const balanceDetail = balanceDetails.find(bd => bd.address.equals(entry.sender))
-            if (!balanceDetail) console.warn("NO BALANCE DETAIL FOUND FOR " + entry.sender.toBase58());
+            if (!balanceDetail) {
+                // It is not clear why this happens, but if a balance detail cannot be found,
+                // filter them out of the result to avoid downstream issues
+                console.warn("NO BALANCE DETAIL FOUND FOR " + entry.sender.toBase58());
+                return null;
+            }
             return {
                 // TODO these default dates are wrong
                 ...balanceDetail,
                 ...entry
             }
-        }),
+        }).filter(e => e !== null),
         senderResult: senders.map(entry => {
             // TODO optimise into a map
             const balanceDetail = balanceDetails.find(bd => bd.address.equals(entry.recipient))
-            if (!balanceDetail) console.warn("NO BALANCE DETAIL FOUND FOR " + entry.recipient.toBase58());
+            if (!balanceDetail) {
+                // It is not clear why this happens, but if a balance detail cannot be found,
+                // filter them out of the result to avoid downstream issues
+                console.warn("NO BALANCE DETAIL FOUND FOR " + entry.recipient.toBase58());
+                return null;
+            }
             return {
                 // TODO these default dates are wrong
                 ...balanceDetail,
                 ...entry
             }
-        }),
+        }).filter(e => e !== null),
     }
 }
 
