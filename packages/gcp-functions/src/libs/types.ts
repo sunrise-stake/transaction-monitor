@@ -1,13 +1,20 @@
 import {PublicKey} from "@solana/web3.js";
 
+type DBTypeSpecificDetails = {
+    type: 'MINT',
+    referrer: PublicKey | undefined
+} | {
+    type: 'TRANSFER' | 'BURN' | 'OTHER'
+}
+
 export type DBTransaction = {
     from: PublicKey,
     to: PublicKey,
     amount: number,
     signature: string,
     timestamp: number
-    type: 'MINT' | 'TRANSFER' | 'BURN' | 'OTHER'
-}
+} & DBTypeSpecificDetails
+
 export type BalanceDetails = {
     address: PublicKey,
     balance: number,

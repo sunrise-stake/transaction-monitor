@@ -46,13 +46,20 @@ export const insertTransaction = (transaction:DBTransaction):Promise<{  status, 
         message: "Inserting transaction",
         transaction
     });
-    return insertOne(transaction.type === 'MINT' ? 'mints' : 'transfers', {
+
+    const document = {
         signature: transaction.signature,
         timestamp: {$date: {$numberLong: transaction.timestamp + "000"}},
         recipient: transaction.to.toBase58(),
         amount: transaction.amount,
         sender: transaction.from.toBase58()
-    })
+    }
+
+    if (transaction.type === 'MINT' && transaction.referrer) {
+        document['referrer'] = transaction.referrer.toBase58();
+    }
+
+    return insertOne(transaction.type === 'MINT' ? 'mints' : 'transfers', document);
 }
 
 const datesFromResult = (result: { firstDate: number, lastDate: number }[]):[Date, Date] =>
@@ -241,6 +248,45 @@ export const getNetTransfers = async (addresses: PublicKey[]): Promise<BalanceDe
         start: new Date(Date.parse(entry.earliestTransferTimestamp)),
         end: new Date(Date.parse(entry.latestTransferTimestamp))
     }));
+}
+
+export const getReferrers = async ({from, to}: {
+    from?: Date,
+    to?: Date
+}): Promise<Map<PublicKey, number>> => {
+    const matchCondition = {
+        referrer: {$exists: true},
+    }
+
+    if (from) {
+        matchCondition['timestamp.$date.$numberLong'] = {$gte: from.getTime};
+    }
+    if (to) {
+        matchCondition['timestamp.$date.$numberLong'] = {$lte: to.getTime};
+    }
+
+    const aggregationPipeline = [
+        { $match: matchCondition },
+        {
+            $group: {
+                _id: "$referrer",
+                count: {$sum: 1}
+            }
+        },
+        {
+            $sort: { count: -1 }
+        }
+    ]
+
+    const referrerResult = await timedAggregate<{
+        _id: string,
+        count: number,
+    }>('mints', aggregationPipeline, 'referrals');
+
+    return new Map(referrerResult.map(entry => ([
+        new PublicKey(entry._id),
+        entry.count
+    ])));
 }
 
 /**

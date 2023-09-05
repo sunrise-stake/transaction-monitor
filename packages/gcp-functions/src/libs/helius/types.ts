@@ -26,7 +26,7 @@ interface InnerInstruction {
     instructions: Instruction[];
 }
 
-interface Instruction {
+export interface Instruction {
     accounts: number[];
     data: string;
     programIdIndex: number;
