@@ -1,19 +1,29 @@
 const senderPipeline = (address, degree) => ([
     {
         $match: {
-            sender: address,
-        },
+            sender: address
+        }
     },
     {
         $unionWith: {
             coll: "transfers",
             pipeline: [
+                { $match: { sender: address } },
+                // Union with mints collection
                 {
-                    $match: {
-                        sender:
-                        address,
-                    },
+                    $unionWith: {
+                        coll: "mints",
+                        pipeline: [
+                            {
+                                $project: {
+                                    sender: "$referrer", // Treat referrer as "sender" for a unified view
+                                    recipient: 1
+                                }
+                            }
+                        ]
+                    }
                 },
+                // Perform graphLookup on combined view
                 {
                     $graphLookup: {
                         from: "transfers",
@@ -22,13 +32,12 @@ const senderPipeline = (address, degree) => ([
                         connectToField: "sender",
                         as: "linked_docs",
                         maxDepth: degree,
-                        depthField: "degree",
-                    },
+                        depthField: "degree"
+                    }
                 },
-
-                { $unwind: '$linked_docs' },
+                { $unwind: "$linked_docs" },
                 {
-                    $replaceRoot: { newRoot: '$linked_docs' }
+                    $replaceRoot: { newRoot: "$linked_docs" }
                 },
                 {
                     $project: {
@@ -38,9 +47,43 @@ const senderPipeline = (address, degree) => ([
                         degree: 1
                     }
                 }
-            ],
-        },
+            ]
+        }
     },
+    // Incorporating direct connections again
+    {
+        $unionWith: {
+            coll: "mints",
+            pipeline: [
+                {
+                    $match: {
+                        referrer: address
+                    }
+                },
+                {
+                    $project: {
+                        sender: "$referrer",
+                        recipient: 1,
+                        degree: { $literal: 0 }
+                    }
+                }
+            ]
+        }
+    },
+    {
+        $group: {
+            _id: { sender: "$sender", recipient: "$recipient" },
+            degree: { $min: "$degree" }
+        }
+    },
+    {
+        $project: {
+            sender: "$_id.sender",
+            recipient: "$_id.recipient",
+            degree: 1,
+            _id: 0
+        }
+    }
 ]);
 
 const recipientPipeline = (address, degree) => ([
@@ -114,6 +157,20 @@ const recipientPipeline = (address, degree) => ([
                     }
                 }
             ]
+        }
+    },
+    {
+        $group: {
+            _id: { sender: "$sender", recipient: "$recipient" },
+            degree: { $min: "$degree" }
+        }
+    },
+    {
+        $project: {
+            sender: "$_id.sender",
+            recipient: "$_id.recipient",
+            degree: 1,
+            _id: 0
         }
     }
 ]);

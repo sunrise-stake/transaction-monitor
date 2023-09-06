@@ -9,5 +9,9 @@
   },
   "dependencies": {
     "mongodb-realm-cli": "^2.6.2"
+  },
+  "devDependencies": {
+    "ts-node": "^10.9.1",
+    "typescript": "^5.2.2"
   }
 }
