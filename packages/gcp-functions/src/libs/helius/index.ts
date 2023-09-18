@@ -13,12 +13,24 @@ const stringDiff = (a: string, b: string, decimals: number): number => {
 }
 
 export const getTokenBalanceDifferences = (transaction: TransactionInBlock, mint: PublicKey): TokenBalanceDifference[] =>
-    transaction.meta.preTokenBalances
-        .filter(preTokenBalance => preTokenBalance.mint === mint.toBase58())
-        .map((preTokenBalance) => {
-            const postTokenBalance = transaction.meta.postTokenBalances.find(
-                postTokenBalance => postTokenBalance.owner === preTokenBalance.owner && postTokenBalance.mint === preTokenBalance.mint
+    transaction.meta.postTokenBalances
+        .filter(postTokenBalance => postTokenBalance.mint === mint.toBase58())
+        .map((postTokenBalance) => {
+            let preTokenBalance = transaction.meta.preTokenBalances.find(
+                preTokenBalance => preTokenBalance.owner === postTokenBalance.owner && preTokenBalance.mint === postTokenBalance.mint
             );
+            if (!preTokenBalance) {
+                // default to 0 if no pre-balance found
+                preTokenBalance = {
+                    ...postTokenBalance,
+                    uiTokenAmount: {
+                        amount: "0",
+                        uiAmount: 0,
+                        uiAmountString: "0",
+                        decimals: postTokenBalance.uiTokenAmount.decimals
+                    }
+                }
+            }
             return {
                 mint,
                 owner: new PublicKey(preTokenBalance.owner),

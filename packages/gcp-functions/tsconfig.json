@@ -1,6 +1,7 @@
 {
   "compilerOptions": {
     "lib": ["ESNext"],
+    "types": ["vitest"],
     "module": "CommonJS",
     "moduleResolution": "node",
     "noUnusedLocals": true,
