@@ -4,52 +4,55 @@ const senderPipeline = (address, degree) => ([
             sender: address
         }
     },
-    {
-        $unionWith: {
-            coll: "transfers",
-            pipeline: [
-                { $match: { sender: address } },
-                // Union with mints collection
-                {
-                    $unionWith: {
-                        coll: "mints",
-                        pipeline: [
-                            {
-                                $project: {
-                                    sender: "$referrer", // Treat referrer as "sender" for a unified view
-                                    recipient: 1
+    ...(degree > 0 ? [
+        {
+            $unionWith: {
+                coll: "transfers",
+                pipeline: [
+                    { $match: { sender: address } },
+                    // Union with mints collection
+                    {
+                        $unionWith: {
+                            coll: "mints",
+                            pipeline: [
+                                { $match: { referrer: address } },
+                                {
+                                    $project: {
+                                        sender: "$referrer", // Treat referrer as "sender" for a unified view
+                                        recipient: 1
+                                    }
                                 }
-                            }
-                        ]
+                            ]
+                        }
+                    },
+                    // Perform graphLookup on combined view
+                    {
+                        $graphLookup: {
+                            from: "transfers",
+                            startWith: "$recipient",
+                            connectFromField: "recipient",
+                            connectToField: "sender",
+                            as: "linked_docs",
+                            maxDepth: degree - 1,
+                            depthField: "degree"
+                        }
+                    },
+                    { $unwind: "$linked_docs" },
+                    {
+                        $replaceRoot: { newRoot: "$linked_docs" }
+                    },
+                    {
+                        $project: {
+                            _id: 0,
+                            sender: 1,
+                            recipient: 1,
+                            degree: 1
+                        }
                     }
-                },
-                // Perform graphLookup on combined view
-                {
-                    $graphLookup: {
-                        from: "transfers",
-                        startWith: "$recipient",
-                        connectFromField: "recipient",
-                        connectToField: "sender",
-                        as: "linked_docs",
-                        maxDepth: degree,
-                        depthField: "degree"
-                    }
-                },
-                { $unwind: "$linked_docs" },
-                {
-                    $replaceRoot: { newRoot: "$linked_docs" }
-                },
-                {
-                    $project: {
-                        _id: 0,
-                        sender: 1,
-                        recipient: 1,
-                        degree: 1
-                    }
-                }
-            ]
-        }
-    },
+                ]
+            }
+        },
+    ] : []),
     // Incorporating direct connections again
     {
         $unionWith: {
@@ -83,6 +86,17 @@ const senderPipeline = (address, degree) => ([
             degree: 1,
             _id: 0
         }
+    },
+    {
+        $addFields: {
+            degree: {
+                $cond: {
+                    if: { $eq: ["$degree", null] },
+                    then: 0,
+                    else: { $add: ["$degree", 1] }
+                }
+            }
+        }
     }
 ]);
 
@@ -92,7 +106,7 @@ const recipientPipeline = (address, degree) => ([
             recipient: address
         }
     },
-    {
+    ...(degree > 0 ? [{
         $unionWith: {
             coll: "transfers",
             pipeline: [
@@ -102,6 +116,7 @@ const recipientPipeline = (address, degree) => ([
                     $unionWith: {
                         coll: "mints",
                         pipeline: [
+                            { $match: { recipient: address } },
                             {
                                 $project: {
                                     sender: "$referrer", // Treat referrer as "sender" for a unified view
@@ -119,7 +134,7 @@ const recipientPipeline = (address, degree) => ([
                         connectFromField: "sender",
                         connectToField: "recipient",
                         as: "linked_docs",
-                        maxDepth: degree,
+                        maxDepth: degree - 1,
                         depthField: "degree"
                     }
                 },
@@ -137,7 +152,7 @@ const recipientPipeline = (address, degree) => ([
                 }
             ]
         }
-    },
+    }] : []),
     // Incorporating direct connections again
     {
         $unionWith: {
@@ -172,18 +187,29 @@ const recipientPipeline = (address, degree) => ([
             degree: 1,
             _id: 0
         }
+    },
+    {
+        $addFields: {
+            degree: {
+                $cond: {
+                    if: { $eq: ["$degree", null] },
+                    then: 0,
+                    else: { $add: ["$degree", 1] }
+                }
+            }
+        }
     }
 ]);
 
-exports = async function(request, response){
-    let serviceName = "mongodb-atlas";
+export const handler = (client) => async (request) => {
     let dbName = "gsol-tracker";
 
     // Get a collection from the context
-    const transfersCollection = context.services.get(serviceName).db(dbName).collection("transfers");
+    // @ts-ignore
+    const transfersCollection = client.db(dbName).collection("transfers");
 
     const address = request.query.address;
-    const degree = Number(request.query.degree || 2);
+    const degree = Number(request.query.degree ?? 2);
 
     const MAX_DEGREE = 6;
     if (degree > MAX_DEGREE) throw new Error(`Degree cannot be greater than ${MAX_DEGREE}`);
@@ -202,4 +228,11 @@ exports = async function(request, response){
     }
 
     return { senderResult, recipientResult };
+}
+
+// used by mongo realms
+exports = async function(request){
+    let serviceName = "mongodb-atlas";
+    // @ts-ignore
+    return handler(context.services.get(serviceName))(request);
 };
